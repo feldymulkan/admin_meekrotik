@@ -1,93 +1,110 @@
-# 🛡️ Mikhmon Admin API (Rust Version)
+# Mikhmon Admin API (Rust Version)
 
-Backend API berperformansi tinggi untuk manajemen pengguna admin menggunakan **Rust**, **Axum**, dan **SeaORM**.
+Modul API Admin berbasis Rust yang didesain untuk performa tinggi dalam mengelola user sistem Mikhmon-Fast. Menggunakan Axum sebagai web framework dan SeaORM untuk interaksi database.
 
-## 🚀 Teknologi yang Digunakan
-- **Rust (Edition 2024)**: Bahasa pemrograman dengan keamanan memori dan kecepatan ekstrim.
-- **Axum**: Web framework modular berbasis Tokio.
-- **SeaORM**: ORM async untuk manajemen database yang modern.
-- **Tokio**: Runtime asynchronous untuk I/O non-blocking.
-- **Bcrypt**: Keamanan password tingkat tinggi.
+## Fitur Utama
+- **High Performance**: Dibangun dengan Rust untuk eksekusi yang sangat cepat.
+- **Dual Database Architecture**: 
+  - `admin_db`: Untuk autentikasi akses ke API ini.
+  - `mikhmon`: Untuk manajemen data user Mikhmon-Fast.
+- **JWT Authentication**: Keamanan akses menggunakan JSON Web Token.
+- **Full CRUD**: Tambah, Edit, Hapus, dan Toggle status user Mikhmon menggunakan `unique_id`.
 
----
+## Persiapan Environment
+Buat atau edit file `.env` di folder root:
 
-## 💾 Persiapan Database (MySQL)
+```env
+# Database Admin (Untuk Login API)
+DATABASE_URL=mysql://pepadu:pepadu@localhost:3306/admin_db
 
-Gunakan skrip berikut atau jalankan file `init.sql` untuk menyiapkan tabel:
+# Database Mikhmon (Yang dikelola)
+MIKHMON_DATABASE_URL=mysql://mikhmon_user:mikhmon_pass123@localhost:3306/mikhmon
 
-```sql
-CREATE DATABASE admin_db;
-USE admin_db;
+# Konfigurasi Server
+HOST=0.0.0.0
+PORT=8085
 
-CREATE TABLE `admin_users` (
-    `id` int(11) NOT NULL AUTO_INCREMENT,
-    `username` varchar(255) NOT NULL,
-    `password_hash` varchar(255) NOT NULL,
-    `is_active` tinyint(1) NOT NULL DEFAULT 1,
-    `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
-    PRIMARY KEY (`id`),
-    UNIQUE KEY `username` (`username`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+# Security
+JWT_SECRET=GantiDenganSecretKeyYangSangatPanjangDanAcak123!
 ```
 
----
-
-## 🏗️ Alur & Arsitektur Program
-
-Program ini mengikuti pola **MVC-ish / Layered Architecture**:
-
-### 1. Inisialisasi (**main.rs**)
-- Aplikasi memuat variabel lingkungan dari `.env`.
-- Menyiapkan **Database Connection Pool** (SeaORM).
-- Mengaktifkan **Tracing** untuk logging/debug.
-- Menginisialisasi `AppState` yang akan di-share ke setiap handler.
-
-### 2. Autentikasi (**auth.rs**)
-- **Flow**: User mengirim `username` & `password` -> API mencari user di DB -> Memvalidasi `is_active` -> Memverifikasi `password` dengan hashing salt `bcrypt` -> Response sukses (dengan mock JWT token).
-
-### 3. Manajemen User (**users.rs**)
-- **CRUD Operations**: Menggunakan pola *ActiveModel* SeaORM untuk memastikan perubahan data tersinkronisasi dengan baik ke database.
-- **Aksi Cepat**: Dilengkapi dengan endpoint `patch` untuk toggle status aktif/nonaktif user secara instan tanpa membebani server.
+## Cara Menjalankan
+1. Pastikan database MySQL berjalan.
+2. Jalankan aplikasi:
+   ```bash
+   cargo run
+   ```
 
 ---
 
-## 🔌 API Endpoints Reference
+## API Reference & Panduan Tes (CURL)
 
-| Method | Endpoint | Deskripsi |
-| :--- | :--- | :--- |
-| `POST` | `/api/auth/login` | Login admin (username & password) |
-| `GET` | `/api/users` | Mengambil semua daftar admin |
-| `POST` | `/api/users` | Menambahkan admin baru |
-| `PUT` | `/api/users/:id` | Mengupdate data admin |
-| `DELETE` | `/api/users/:id` | Menghapus admin secara permanen |
-| `PATCH` | `/api/users/:id/toggle` | Mengubah status aktif/nonaktif |
+### 1. Login Admin
+Gunakan ini untuk mendapatkan Token JWT.
+- **Username**: `admin`
+- **Password**: `admin123`
 
----
-
-## 🛠️ Cara Menjalankan
-
-### Persiapan Linker (PENTING)
-Pastikan sistem Anda sudah memiliki `gcc` terinstal (diperlukan oleh library `bcrypt` dan driver MySQL):
 ```bash
-sudo apt update && sudo apt install -y gcc
+curl -i -X POST http://localhost:8085/api/auth/login \
+     -H "Content-Type: application/json" \
+     -d '{"username": "admin", "password": "admin123"}'
 ```
 
-### Konfigurasi Environment
-Salin template `.env` dan sesuaikan kredensial database Anda:
+### 2. List User Mikhmon
+Melihat semua user yang terdaftar di database Mikhmon.
+
 ```bash
-cp .env.example .env
+curl -i -X GET http://localhost:8085/api/users \
+     -H "Authorization: Bearer <TOKEN_ANDA>"
 ```
 
-### Kompilasi & Jalankan
+### 3. Tambah User Mikhmon Baru
+Menambah user baru ke dalam database Mikhmon-Fast.
+
 ```bash
-cargo run
+curl -i -X POST http://localhost:8085/api/users \
+     -H "Authorization: Bearer <TOKEN_ANDA>" \
+     -H "Content-Type: application/json" \
+     -d '{
+       "username": "user_baru",
+       "password": "password123"
+     }'
+```
+
+> **Note**: Field `unique_id` akan digenerate otomatis secara random, sedangkan `theme` (light) dan `lang` (id) akan diatur menggunakan nilai default jika tidak dikirim dalam request.
+
+### 4. Update User Mikhmon
+Mengubah data user menggunakan **unique_id**.
+
+```bash
+curl -i -X PUT http://localhost:8085/api/users/router_01 \
+     -H "Authorization: Bearer <TOKEN_ANDA>" \
+     -H "Content-Type: application/json" \
+     -d '{
+       "theme": "dark",
+       "themecolor": "#20a8d8"
+     }'
+```
+
+### 5. Toggle Status User (Aktif/Non-aktif)
+Mengaktifkan atau menonaktifkan user menggunakan **unique_id**.
+
+```bash
+curl -i -X PATCH http://localhost:8085/api/users/router_01/toggle \
+     -H "Authorization: Bearer <TOKEN_ANDA>"
+```
+
+### 6. Hapus User Mikhmon
+Menghapus user secara permanen menggunakan **unique_id**.
+
+```bash
+curl -i -X DELETE http://localhost:8085/api/users/router_01 \
+     -H "Authorization: Bearer <TOKEN_ANDA>"
 ```
 
 ---
 
-## 📂 Struktur Folder
-- `src/main.rs`: Entry point & Server Setup.
-- `src/entities/`: Definisi model database (SeaORM).
-- `src/routes/`: Logika handler untuk setiap endpoint API.
-- `src/routes/auth.rs`: Logika login & keamanan.
-- `src/routes/users.rs`: Logika manajemen pengguna.
+## Troubleshooting
+- **Address already in use**: Jika muncul error port terpakai, jalankan `pkill -9 admin`.
+- **Invalid Credentials**: Pastikan password di database sesuai. Gunakan `admin123` untuk login awal.
+- **Database Error**: Pastikan user MySQL memiliki izin akses ke database `admin_db` dan `mikhmon`.

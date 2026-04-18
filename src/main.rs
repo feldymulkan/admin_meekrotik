@@ -1,5 +1,5 @@
 use axum::{
-    routing::{get, post, patch, put, delete},
+    routing::{get, post, patch, put},
     Router,
 };
 use sea_orm::{Database, DatabaseConnection};
@@ -13,7 +13,9 @@ mod routes;
 
 #[derive(Clone)]
 pub struct AppState {
-    pub db: DatabaseConnection,
+    pub db: DatabaseConnection,         // Admin DB
+    pub mikhmon_db: DatabaseConnection, // Mikhmon DB
+    pub jwt_secret: String,
 }
 
 #[tokio::main]
@@ -31,9 +33,14 @@ async fn main() {
 
     // Database connection
     let db_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
-    let db = Database::connect(db_url).await.expect("Failed to connect to database");
+    let db = Database::connect(db_url).await.expect("Failed to connect to admin database");
 
-    let state = AppState { db };
+    let mikhmon_db_url = std::env::var("MIKHMON_DATABASE_URL").expect("MIKHMON_DATABASE_URL must be set");
+    let mikhmon_db = Database::connect(mikhmon_db_url).await.expect("Failed to connect to mikhmon database");
+
+    let jwt_secret = std::env::var("JWT_SECRET").expect("JWT_SECRET must be set");
+
+    let state = AppState { db, mikhmon_db, jwt_secret };
 
     // Build routes
     let app = Router::new()

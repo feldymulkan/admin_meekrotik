@@ -8,7 +8,8 @@ use crate::AppState;
 use crate::entities::users::{Entity as User, Column};
 use sea_orm::{EntityTrait, QueryFilter, ColumnTrait};
 use bcrypt::verify;
-use hyper::StatusCode;
+use axum::http::StatusCode;
+use jsonwebtoken::{encode, Header, EncodingKey};
 
 #[derive(Deserialize)]
 pub struct LoginRequest {
@@ -21,6 +22,12 @@ pub struct LoginResponse {
     pub success: bool,
     pub message: String,
     pub token: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct Claims {
+    pub sub: String,
+    pub exp: usize,
 }
 
 pub async fn login(
@@ -43,11 +50,27 @@ pub async fn login(
             }
 
             if verify(payload.password, &user.password_hash).unwrap_or(false) {
-                // In a real app, generate a JWT here
+                // Generate real JWT token
+                let expiration = chrono::Utc::now()
+                    .checked_add_signed(chrono::Duration::hours(24))
+                    .expect("valid timestamp")
+                    .timestamp() as usize;
+
+                let claims = Claims {
+                    sub: user.username,
+                    exp: expiration,
+                };
+
+                let token = encode(
+                    &Header::default(),
+                    &claims,
+                    &EncodingKey::from_secret(state.jwt_secret.as_ref()),
+                ).unwrap_or_else(|_| "token_error".to_string());
+
                 (StatusCode::OK, Json(LoginResponse {
                     success: true,
                     message: "Login successful".to_string(),
-                    token: Some("mock_jwt_token".to_string()),
+                    token: Some(token),
                 })).into_response()
             } else {
                 (StatusCode::UNAUTHORIZED, Json(LoginResponse {
