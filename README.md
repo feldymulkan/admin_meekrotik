@@ -1,110 +1,131 @@
-# Mikhmon Admin API (Rust Version)
+# 🚀 Mikhmon Admin System
 
-Modul API Admin berbasis Rust yang didesain untuk performa tinggi dalam mengelola user sistem Mikhmon-Fast. Menggunakan Axum sebagai web framework dan SeaORM untuk interaksi database.
+Sistem manajemen admin modern untuk Mikhmon-Fast dengan backend Rust dan frontend React. Sistem ini telah dioptimasi untuk keamanan tinggi dan performa skala besar.
 
-## Fitur Utama
-- **High Performance**: Dibangun dengan Rust untuk eksekusi yang sangat cepat.
-- **Dual Database Architecture**: 
-  - `admin_db`: Untuk autentikasi akses ke API ini.
-  - `mikhmon`: Untuk manajemen data user Mikhmon-Fast.
-- **JWT Authentication**: Keamanan akses menggunakan JSON Web Token.
-- **Full CRUD**: Tambah, Edit, Hapus, dan Toggle status user Mikhmon menggunakan `unique_id`.
+## ✨ Fitur Baru & Optimasi
 
-## Persiapan Environment
-Buat atau edit file `.env` di folder root:
+- **🛡️ Two-Factor Authentication (2FA)**: Login super aman menggunakan Google Authenticator/Authy.
+- **⚙️ Admin Settings**: Halaman khusus untuk reset password dan aktivasi/deaktivasi 2FA.
+- **⚡ High-Performance Background Worker**: Pembersihan otomatis user expired setiap 24 jam tanpa membebani server.
+- **🏎️ Database Connection Pooling**: Optimasi koneksi MySQL (Admin DB & Mikhmon DB) untuk menangani trafik tinggi.
+- **🔐 Security Hardening**: Menghapus potensi crash server (Denial of Service) dengan error handling yang ketat.
+- **🐳 Dockerized**: Deployment instan menggunakan Docker & Docker Compose.
+
+---
+
+## 🌐 Deployment di VPS dengan Nginx Reverse Proxy (Recommended)
+
+Jika Anda memiliki VPS yang sudah terinstall Nginx, ikuti langkah ini agar sistem aman dan menggunakan HTTPS:
+
+### 1. Jalankan Docker
+
+Pastikan `docker-compose.yml` menggunakan binding `127.0.0.1` (sudah diatur secara default).
+
+```bash
+docker-compose up -d --build
+```
+
+### 2. Konfigurasi Nginx VPS
+
+Salin isi dari file `vps-nginx.conf` ke konfigurasi Nginx VPS Anda:
+
+```bash
+sudo cp vps-nginx.conf /etc/nginx/sites-available/mikhmon-admin
+sudo ln -s /etc/nginx/sites-available/mikhmon-admin /etc/nginx/sites-enabled/
+sudo nginx -t
+sudo systemctl restart nginx
+```
+
+### 3. Pasang SSL (HTTPS)
+
+Gunakan Certbot untuk mengamankan koneksi:
+
+```bash
+sudo certbot --nginx -d domain-anda.com
+```
+
+---
+
+### 1. Persiapan Environment
+
+Pastikan file `.env` sudah terisi dengan benar di root direktori:
 
 ```env
-# Database Admin (Untuk Login API)
-DATABASE_URL=mysql://pepadu:pepadu@localhost:3306/admin_db
-
-# Database Mikhmon (Yang dikelola)
-MIKHMON_DATABASE_URL=mysql://mikhmon_user:mikhmon_pass123@localhost:3306/mikhmon
-
-# Konfigurasi Server
-HOST=0.0.0.0
-PORT=8085
-
-# Security
-JWT_SECRET=GantiDenganSecretKeyYangSangatPanjangDanAcak123!
+DATABASE_URL=mysql://user:pass@host/admin_db
+MIKHMON_DATABASE_URL=mysql://user:pass@host/mikhmon_db
+JWT_SECRET=rahasia_super_kuat
+FRONTEND_URL=http://localhost:8089
 ```
 
-## Cara Menjalankan
-1. Pastikan database MySQL berjalan.
-2. Jalankan aplikasi:
-   ```bash
-   cargo run
-   ```
+### 2. Migrasi Database Mikhmon-Fast
+
+Agar fitur *Expired Date* dan *Created Date* berfungsi, Anda perlu menambahkan kolom berikut ke tabel `users` di database **Mikhmon-Fast** Anda:
+
+```sql
+/* Jalankan ini di database mikhmon_db Anda */
+ALTER TABLE users ADD COLUMN IF NOT EXISTS created_date VARCHAR(20);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS expired_date VARCHAR(20);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active TINYINT(1) DEFAULT 1;
+```
+
+### 3. Jalankan Sistem
+
+Gunakan perintah berikut untuk membangun dan menjalankan seluruh layanan:
+
+```bash
+docker-compose up -d --build
+```
+
+- **Frontend**: Akses di `http://localhost:8089`
+- **Backend API**: Berjalan di `http://localhost:8080`
 
 ---
 
-## API Reference & Panduan Tes (CURL)
+## 🛠️ Penggunaan Fitur 2FA
 
-### 1. Login Admin
-Gunakan ini untuk mendapatkan Token JWT.
-- **Username**: `admin`
-- **Password**: `admin123`
+1. **Aktivasi**:
+   - Login ke Dashboard.
+   - Buka menu **Settings** di sidebar.
+   - Klik **Enable 2FA**.
+   - Scan QR Code yang muncul menggunakan aplikasi **Google Authenticator** di HP Anda.
+   - Masukkan kode 6 digit untuk konfirmasi.
+2. **Login dengan 2FA**:
+   - Setelah aktif, setiap login akan meminta kode 6 digit dari HP Anda setelah memasukkan password.
+3. **Reset/Disable**:
+   - Anda dapat menonaktifkan 2FA kapan saja di halaman Settings dengan memasukkan password konfirmasi.
+
+---
+
+## 🚀 Optimasi Performa & Keamanan yang Dilakukan
+
+### 1. Keamanan (Security)
+
+- **Safe Error Handling**: Mengganti semua fungsi `.unwrap()` di Rust yang berisiko membuat server _crash_ jika database bermasalah.
+- **Input Validation**: Validasi ketat pada username (alphanumeric only) dan panjang karakter untuk mencegah serangan injeksi atau overload data.
+
+### 2. Performa (Performance)
+
+- **State Management Optimization**: Frontend tidak lagi men-download ulang seluruh data user setiap kali ada perubahan (Edit/Delete). UI akan mengupdate data secara lokal secara instan.
+- **Connection Limits**: Membatasi koneksi database agar tidak terjadi _resource exhaustion_ (kehabisan RAM) saat banyak user mengakses secara bersamaan.
+
+---
+
+## 👨‍💻 Pengembangan Lokal (Tanpa Docker)
+
+**Backend (Rust):**
 
 ```bash
-curl -i -X POST http://localhost:8085/api/auth/login \
-     -H "Content-Type: application/json" \
-     -d '{"username": "admin", "password": "admin123"}'
+cargo run
 ```
 
-### 2. List User Mikhmon
-Melihat semua user yang terdaftar di database Mikhmon.
+**Frontend (React):**
 
 ```bash
-curl -i -X GET http://localhost:8085/api/users \
-     -H "Authorization: Bearer <TOKEN_ANDA>"
-```
-
-### 3. Tambah User Mikhmon Baru
-Menambah user baru ke dalam database Mikhmon-Fast.
-
-```bash
-curl -i -X POST http://localhost:8085/api/users \
-     -H "Authorization: Bearer <TOKEN_ANDA>" \
-     -H "Content-Type: application/json" \
-     -d '{
-       "username": "user_baru",
-       "password": "password123"
-     }'
-```
-
-> **Note**: Field `unique_id` akan digenerate otomatis secara random, sedangkan `theme` (light) dan `lang` (id) akan diatur menggunakan nilai default jika tidak dikirim dalam request.
-
-### 4. Update User Mikhmon
-Mengubah data user menggunakan **unique_id**.
-
-```bash
-curl -i -X PUT http://localhost:8085/api/users/router_01 \
-     -H "Authorization: Bearer <TOKEN_ANDA>" \
-     -H "Content-Type: application/json" \
-     -d '{
-       "theme": "dark",
-       "themecolor": "#20a8d8"
-     }'
-```
-
-### 5. Toggle Status User (Aktif/Non-aktif)
-Mengaktifkan atau menonaktifkan user menggunakan **unique_id**.
-
-```bash
-curl -i -X PATCH http://localhost:8085/api/users/router_01/toggle \
-     -H "Authorization: Bearer <TOKEN_ANDA>"
-```
-
-### 6. Hapus User Mikhmon
-Menghapus user secara permanen menggunakan **unique_id**.
-
-```bash
-curl -i -X DELETE http://localhost:8085/api/users/router_01 \
-     -H "Authorization: Bearer <TOKEN_ANDA>"
+cd ui
+npm install
+npm run dev
 ```
 
 ---
 
-## Troubleshooting
-- **Address already in use**: Jika muncul error port terpakai, jalankan `pkill -9 admin`.
-- **Invalid Credentials**: Pastikan password di database sesuai. Gunakan `admin123` untuk login awal.
-- **Database Error**: Pastikan user MySQL memiliki izin akses ke database `admin_db` dan `mikhmon`.
+_Dikembangkan dengan ❤️ untuk ekosistem Mikhmon yang lebih cepat dan aman._

@@ -11,7 +11,7 @@ pub struct Model {
     #[sea_orm(unique)]
     pub username: String,
     pub password_hash: String,
-    pub is_active: bool,
+    pub totp_secret: Option<String>,
     pub created_at: DateTimeUtc,
 }
 

@@ -1,0 +1,39 @@
+@import "tailwindcss";
+
+@layer base {
+  button, 
+  [role="button"],
+  input[type="submit"],
+  input[type="reset"],
+  input[type="button"],
+  label[for],
+  select,
+  a {
+    cursor: pointer;
+  }
+
+  /* Tambahan: Efek scale sedikit saat hover agar terasa lebih interaktif/premium */
+  button:active, 
+  a:active {
+    transform: scale(0.98);
+    transition: transform 0.1s ease;
+  }
+}
+
+/* Custom scrollbar untuk tampilan dark mode yang lebih konsisten */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #0f172a;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #475569;
+}

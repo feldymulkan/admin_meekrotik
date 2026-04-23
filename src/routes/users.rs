@@ -19,6 +19,8 @@ pub struct CreateUserRequest {
     pub theme: Option<String>,
     pub themecolor: Option<String>,
     pub lang: Option<String>,
+    pub created_date: Option<String>,
+    pub expired_date: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -30,6 +32,8 @@ pub struct UpdateUserRequest {
     pub theme: Option<String>,
     pub themecolor: Option<String>,
     pub lang: Option<String>,
+    pub created_date: Option<String>,
+    pub expired_date: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -41,6 +45,8 @@ pub struct UserResponse {
     pub theme: Option<String>,
     pub themecolor: Option<String>,
     pub lang: Option<String>,
+    pub created_date: Option<String>,
+    pub expired_date: Option<String>,
 }
 
 pub async fn list_users(State(state): State<AppState>) -> impl IntoResponse {
@@ -58,6 +64,8 @@ pub async fn list_users(State(state): State<AppState>) -> impl IntoResponse {
                     theme: u.theme,
                     themecolor: u.themecolor,
                     lang: u.lang,
+                    created_date: u.created_date,
+                    expired_date: u.expired_date,
                 })
                 .collect();
             Json(resp).into_response()
@@ -70,7 +78,21 @@ pub async fn create_user(
     State(state): State<AppState>,
     Json(payload): Json<CreateUserRequest>,
 ) -> impl IntoResponse {
-    let password_hash = hash(payload.password, DEFAULT_COST).unwrap();
+    // Basic validation
+    if payload.username.trim().is_empty() || payload.username.len() > 50 {
+        return (StatusCode::BAD_REQUEST, "Username must be between 1 and 50 characters").into_response();
+    }
+    if !payload.username.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-' || c == '.') {
+        return (StatusCode::BAD_REQUEST, "Username can only contain letters, numbers, underscores, hyphens, and dots").into_response();
+    }
+    if payload.password.len() < 6 {
+        return (StatusCode::BAD_REQUEST, "Password must be at least 6 characters").into_response();
+    }
+
+    let password_hash = match hash(&payload.password, DEFAULT_COST) {
+        Ok(h) => h,
+        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to process password").into_response(),
+    };
     
     // Generate random unique_id if not provided
     let unique_id = payload.unique_id.unwrap_or_else(|| nanoid!(10));
@@ -83,6 +105,8 @@ pub async fn create_user(
         theme: Set(payload.theme.or(Some("light".to_string()))),
         themecolor: Set(payload.themecolor.or(Some("#3a4149".to_string()))),
         lang: Set(payload.lang.or(Some("id".to_string()))),
+        created_date: Set(payload.created_date.or(Some(chrono::Local::now().format("%Y-%m-%d").to_string()))),
+        expired_date: Set(payload.expired_date),
         ..Default::default()
     };
 
@@ -95,8 +119,13 @@ pub async fn create_user(
             theme: user.theme,
             themecolor: user.themecolor,
             lang: user.lang,
+            created_date: user.created_date,
+            expired_date: user.expired_date,
         })).into_response(),
-        Err(e) => (StatusCode::BAD_REQUEST, e.to_string()).into_response(),
+        Err(e) => {
+            tracing::error!("Database error: {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, "Failed to create user. It might already exist.").into_response()
+        },
     }
 }
 
@@ -115,11 +144,20 @@ pub async fn update_user(
             let mut user: ActiveModel = user.into();
             
             if let Some(username) = payload.username {
+                if username.trim().is_empty() {
+                    return (StatusCode::BAD_REQUEST, "Username cannot be empty").into_response();
+                }
                 user.username = Set(username);
             }
             
             if let Some(password) = payload.password {
-                let password_hash = hash(password, DEFAULT_COST).unwrap();
+                if password.len() < 6 {
+                    return (StatusCode::BAD_REQUEST, "Password must be at least 6 characters").into_response();
+                }
+                let password_hash = match hash(&password, DEFAULT_COST) {
+                    Ok(h) => h,
+                    Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to process password").into_response(),
+                };
                 user.password = Set(password_hash);
             }
 
@@ -143,6 +181,14 @@ pub async fn update_user(
                 user.lang = Set(Some(lang));
             }
 
+            if let Some(created_date) = payload.created_date {
+                user.created_date = Set(Some(created_date));
+            }
+
+            if let Some(expired_date) = payload.expired_date {
+                user.expired_date = Set(Some(expired_date));
+            }
+
             match user.update(&state.mikhmon_db).await {
                 Ok(user) => Json(UserResponse {
                     id: user.id,
@@ -152,8 +198,13 @@ pub async fn update_user(
                     theme: user.theme,
                     themecolor: user.themecolor,
                     lang: user.lang,
+                    created_date: user.created_date,
+                    expired_date: user.expired_date,
                 }).into_response(),
-                Err(e) => (StatusCode::BAD_REQUEST, e.to_string()).into_response(),
+                Err(e) => {
+                    tracing::error!("Database error: {}", e);
+                    (StatusCode::INTERNAL_SERVER_ERROR, "Failed to update user").into_response()
+                },
             }
         }
         _ => (StatusCode::NOT_FOUND, "User not found").into_response(),
@@ -204,6 +255,8 @@ pub async fn toggle_user(
                     theme: user.theme,
                     themecolor: user.themecolor,
                     lang: user.lang,
+                    created_date: user.created_date,
+                    expired_date: user.expired_date,
                 }).into_response(),
                 Err(e) => (StatusCode::BAD_REQUEST, e.to_string()).into_response(),
             }

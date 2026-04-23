@@ -1,0 +1,15 @@
+nohup: ignoring input
+warning: struct `Setup2FAResponse` is never constructed
+  --> src/routes/auth.rs:57:12
+   |
+57 | pub struct Setup2FAResponse {
+   |            ^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `admin` (bin "admin") generated 1 warning
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.14s
+     Running `target/debug/admin`
+[2m2026-04-23T03:33:40.198107Z[0m [32m INFO[0m [2madmin[0m[2m:[0m Listening on 0.0.0.0:8080
+[2m2026-04-23T03:33:40.198133Z[0m [32m INFO[0m [2madmin[0m[2m:[0m Running expiration check background task...
+[2m2026-04-23T03:33:40.200433Z[0m [32m INFO[0m [2madmin[0m[2m:[0m Expiration check completed. Rows affected: 0

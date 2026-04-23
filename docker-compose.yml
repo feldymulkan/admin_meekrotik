@@ -1,0 +1,22 @@
+services:
+  backend:
+    build: .
+    container_name: mikhmon-admin-api
+    restart: always
+    ports:
+      - "127.0.0.1:8080:8080" # Terkunci di localhost
+    env_file:
+      - .env
+    volumes:
+      - ./.env:/app/.env
+
+  frontend:
+    build:
+      context: .
+      dockerfile: ui/Dockerfile
+    container_name: mikhmon-admin-ui
+    restart: always
+    ports:
+      - "127.0.0.1:8089:80" # Terkunci di localhost
+    depends_on:
+      - backend

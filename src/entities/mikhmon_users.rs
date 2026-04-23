@@ -15,6 +15,8 @@ pub struct Model {
     pub theme: Option<String>,
     pub themecolor: Option<String>,
     pub lang: Option<String>,
+    pub created_date: Option<String>,
+    pub expired_date: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
