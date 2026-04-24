@@ -4,11 +4,16 @@ services:
     container_name: mikhmon-admin-api
     restart: always
     ports:
-      - "127.0.0.1:8080:8080" # Terkunci di localhost
+      - "8080:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      - DATABASE_URL=mysql://pepadu:pepadu@host.docker.internal:3306/admin_db
+      - MIKHMON_DATABASE_URL=mysql://mikhmon_user:mikhmon_pass123@host.docker.internal:3306/mikhmon
+      - HOST=0.0.0.0
+      - PORT=8080
     env_file:
       - .env
-    volumes:
-      - ./.env:/app/.env
 
   frontend:
     build:
@@ -17,6 +22,6 @@ services:
     container_name: mikhmon-admin-ui
     restart: always
     ports:
-      - "127.0.0.1:8089:80" # Terkunci di localhost
+      - "8089:80"
     depends_on:
       - backend

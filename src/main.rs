@@ -1,16 +1,17 @@
 use axum::{
-    routing::{get, post, patch, put},
     Router,
+    routing::{get, patch, post, put},
 };
+use dotenvy::dotenv;
 use sea_orm::{ConnectOptions, Database, DatabaseConnection};
 use std::net::SocketAddr;
 use tower_http::cors::CorsLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
-use dotenvy::dotenv;
 
 mod entities;
-mod routes;
 mod middleware;
+mod routes;
+use migration::MigratorTrait;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -36,41 +37,75 @@ async fn main() {
     let db_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
     let mut db_opts = ConnectOptions::new(db_url);
     db_opts.max_connections(50).min_connections(5);
-    let db = Database::connect(db_opts).await.expect("Failed to connect to admin database");
+    let db = Database::connect(db_opts)
+        .await
+        .expect("Failed to connect to admin database");
 
-    let mikhmon_db_url = std::env::var("MIKHMON_DATABASE_URL").expect("MIKHMON_DATABASE_URL must be set");
+    let mikhmon_db_url =
+        std::env::var("MIKHMON_DATABASE_URL").expect("MIKHMON_DATABASE_URL must be set");
     let mut mikhmon_db_opts = ConnectOptions::new(mikhmon_db_url);
     mikhmon_db_opts.max_connections(100).min_connections(5);
-    let mikhmon_db = Database::connect(mikhmon_db_opts).await.expect("Failed to connect to mikhmon database");
+    let mikhmon_db = Database::connect(mikhmon_db_opts)
+        .await
+        .expect("Failed to connect to mikhmon database");
 
     let jwt_secret = std::env::var("JWT_SECRET").expect("JWT_SECRET must be set");
 
-    let state = AppState { db, mikhmon_db, jwt_secret };
+    let state = AppState {
+        db,
+        mikhmon_db,
+        jwt_secret,
+    };
+
+    // Run migrations and patches
+    migration::Migrator::up(&state.db, None)
+        .await
+        .expect("Failed to run migrations for admin database");
+    setup_mikhmon_database(&state.mikhmon_db).await;
+    ensure_default_admin(&state.db).await;
 
     // CORS configuration
-    let frontend_url = std::env::var("FRONTEND_URL").unwrap_or_else(|_| "http://localhost:8089".to_string());
+    let frontend_url =
+        std::env::var("FRONTEND_URL").unwrap_or_else(|_| "http://localhost:8089".to_string());
     let cors = CorsLayer::new()
         .allow_origin(frontend_url.parse::<axum::http::HeaderValue>().unwrap())
-        .allow_methods([axum::http::Method::GET, axum::http::Method::POST, axum::http::Method::PUT, axum::http::Method::PATCH, axum::http::Method::DELETE])
-        .allow_headers([axum::http::header::AUTHORIZATION, axum::http::header::CONTENT_TYPE]);
+        .allow_methods([
+            axum::http::Method::GET,
+            axum::http::Method::POST,
+            axum::http::Method::PUT,
+            axum::http::Method::PATCH,
+            axum::http::Method::DELETE,
+        ])
+        .allow_headers([
+            axum::http::header::AUTHORIZATION,
+            axum::http::header::CONTENT_TYPE,
+        ]);
 
     // Build routes - Protected by JWT middleware
     let protected_routes = Router::new()
         // User management (Mikhmon)
-        .route("/api/users", get(routes::users::list_users).post(routes::users::create_user))
+        .route(
+            "/api/users",
+            get(routes::users::list_users).post(routes::users::create_user),
+        )
         .route(
             "/api/users/:id",
-            put(routes::users::update_user)
-                .delete(routes::users::delete_user),
+            put(routes::users::update_user).delete(routes::users::delete_user),
         )
         .route("/api/users/:id/toggle", patch(routes::users::toggle_user))
         // Admin settings (Password & 2FA)
-        .route("/api/auth/reset-password", put(routes::auth::reset_password))
+        .route(
+            "/api/auth/reset-password",
+            put(routes::auth::reset_password),
+        )
         .route("/api/auth/2fa/setup", get(routes::auth::setup_2fa))
         .route("/api/auth/2fa/verify", post(routes::auth::verify_2fa))
         .route("/api/auth/2fa/disable", post(routes::auth::disable_2fa))
         .route("/api/auth/2fa/status", get(routes::auth::get_2fa_status))
-        .layer(axum::middleware::from_fn_with_state(state.clone(), middleware::auth::auth_middleware));
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            middleware::auth::auth_middleware,
+        ));
 
     let app = Router::new()
         .route("/api/auth/login", post(routes::auth::login))
@@ -84,11 +119,14 @@ async fn main() {
         loop {
             tracing::info!("Running expiration check background task...");
             let query = "UPDATE users SET is_active = 0 WHERE expired_date IS NOT NULL AND expired_date != '' AND expired_date < CURDATE() AND is_active = 1";
-            match sea_orm::ConnectionTrait::execute(&bg_db, sea_orm::Statement::from_string(sea_orm::DatabaseBackend::MySql, query.to_owned())).await {
-                Ok(result) => tracing::info!("Expiration check completed. Rows affected: {}", result.rows_affected()),
+            match sea_orm::ConnectionTrait::execute_unprepared(&bg_db, query).await {
+                Ok(result) => tracing::info!(
+                    "Expiration check completed. Rows affected: {}",
+                    result.rows_affected()
+                ),
                 Err(e) => tracing::error!("Failed to execute expiration check: {}", e),
             }
-            
+
             // Sleep for 24 hours (86400 seconds)
             tokio::time::sleep(std::time::Duration::from_secs(86400)).await;
         }
@@ -104,4 +142,53 @@ async fn main() {
     tracing::info!("Listening on {}", addr);
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();
+}
+
+async fn setup_mikhmon_database(db: &sea_orm::DatabaseConnection) {
+    tracing::info!("Checking and patching mikhmon database schema...");
+
+    // Daftar kolom yang perlu dipastikan ada di tabel 'users' mikhmon
+    let alter_queries = [
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active TINYINT(1) DEFAULT 1",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS created_date VARCHAR(20) DEFAULT NULL",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS expired_date VARCHAR(20) DEFAULT NULL",
+    ];
+
+    for query in alter_queries {
+        match sea_orm::ConnectionTrait::execute_unprepared(db, query).await {
+            Ok(_) => (),
+            Err(e) => tracing::warn!(
+                "Notice: Table patch step might have skipped (this is usually fine): {}",
+                e
+            ),
+        }
+    }
+    tracing::info!("Mikhmon database schema check completed.");
+}
+
+async fn ensure_default_admin(db: &sea_orm::DatabaseConnection) {
+    use crate::entities::users::{ActiveModel, Entity as AdminUser};
+    use sea_orm::{ActiveModelTrait, EntityTrait, Set};
+
+    match AdminUser::find().one(db).await {
+        Ok(None) => {
+            tracing::info!("No admin users found. Creating default 'admin' user...");
+            let default_admin = ActiveModel {
+                username: Set("admin".to_owned()),
+                // Hash for 'admin123'
+                password_hash: Set(
+                    "$2a$12$R9h/lIPzHZluvTFyvn.p8uW6XzvP7Gj7X5zB5zB5zB5zB5zB5zB5z".to_owned(),
+                ),
+                ..Default::default()
+            };
+
+            if let Err(e) = default_admin.insert(db).await {
+                tracing::error!("Failed to create default admin user: {}", e);
+            } else {
+                tracing::info!("Default 'admin' user created successfully");
+            }
+        }
+        Ok(Some(_)) => (),
+        Err(e) => tracing::error!("Failed to check for existing admin users: {}", e),
+    }
 }

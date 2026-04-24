@@ -1,5 +1,5 @@
 # Stage 1: Build
-FROM rust:1.80-slim-bookworm as builder
+FROM rust:slim-bookworm as builder
 
 WORKDIR /usr/src/app
 COPY . .
@@ -20,7 +20,6 @@ RUN apt-get update && apt-get install -y libssl3 ca-certificates && rm -rf /var/
 
 # Copy binary from builder
 COPY --from=builder /usr/src/app/target/release/admin /app/admin
-COPY .env /app/.env
 
 EXPOSE 8080
 

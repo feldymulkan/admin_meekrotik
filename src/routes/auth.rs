@@ -256,20 +256,20 @@ pub async fn setup_2fa(
     ) {
         Ok(t) => t,
         Err(_) => {
-            return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({
-                "success": false,
-                "message": "Failed to generate TOTP"
-            }))).into_response();
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(MessageResponse {
+                success: false,
+                message: "Failed to generate TOTP".to_string()
+            })).into_response();
         }
     };
 
     let qr_code = match totp.get_qr_base64() {
         Ok(qr) => qr,
         Err(_) => {
-            return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({
-                "success": false,
-                "message": "Failed to generate QR code"
-            }))).into_response();
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(MessageResponse {
+                success: false,
+                message: "Failed to generate QR code".to_string()
+            })).into_response();
         }
     };
 
@@ -285,21 +285,21 @@ pub async fn setup_2fa(
             active.totp_secret = Set(Some(format!("pending:{}", secret_base32)));
 
             if active.update(&state.db).await.is_err() {
-                return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({
-                    "success": false,
-                    "message": "Failed to save 2FA setup"
-                }))).into_response();
+                return (StatusCode::INTERNAL_SERVER_ERROR, Json(MessageResponse {
+                    success: false,
+                    message: "Failed to save 2FA setup".to_string()
+                })).into_response();
             }
 
-            Json(serde_json::json!({
-                "qr_code_base64": qr_code,
-                "secret": secret_base32
-            })).into_response()
+            Json(Setup2FAResponse {
+                qr_code_base64: qr_code,
+                secret: secret_base32
+            }).into_response()
         }
-        _ => (StatusCode::NOT_FOUND, Json(serde_json::json!({
-            "success": false,
-            "message": "User not found"
-        }))).into_response(),
+        _ => (StatusCode::NOT_FOUND, Json(MessageResponse {
+            success: false,
+            message: "User not found".to_string()
+        })).into_response(),
     }
 }
 
