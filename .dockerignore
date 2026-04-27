@@ -5,3 +5,8 @@ ui/dist/
 .git/
 .env
 *.log
+DEPLOYMENT.md
+GEMINI.md
+README.md
+SECURITY.md
+vps-nginx.conf

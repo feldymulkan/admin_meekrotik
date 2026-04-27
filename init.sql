@@ -11,9 +11,8 @@ CREATE TABLE `admin_users` (
     UNIQUE KEY `username` (`username`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- Password awal adalah 'admin123' (sudah di-hash dengan bcrypt)
-INSERT INTO `admin_users` (`username`, `password_hash`) 
-VALUES ('admin', '$2a$12$R9h/lIPzHZluvTFyvn.p8uW6XzvP7Gj7X5zB5zB5zB5zB5zB5zB5z');
+-- Note: Admin user will be automatically created by the backend application 
+-- using ADMIN_USERNAME and ADMIN_PASSWORD environment variables if no users exist.
 
 -- Note: Ensure mikhmon database 'users' table has 'created_date' and 'expired_date' columns (VARCHAR or DATE).
 -- ALTER TABLE users ADD COLUMN created_date VARCHAR(20);

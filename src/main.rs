@@ -62,7 +62,6 @@ async fn main() {
         .await
         .expect("Failed to run migrations for admin database");
     setup_mikhmon_database(&state.mikhmon_db).await;
-    ensure_default_admin(&state.db).await;
 
     // CORS configuration
     let frontend_url =
@@ -164,31 +163,4 @@ async fn setup_mikhmon_database(db: &sea_orm::DatabaseConnection) {
         }
     }
     tracing::info!("Mikhmon database schema check completed.");
-}
-
-async fn ensure_default_admin(db: &sea_orm::DatabaseConnection) {
-    use crate::entities::users::{ActiveModel, Entity as AdminUser};
-    use sea_orm::{ActiveModelTrait, EntityTrait, Set};
-
-    match AdminUser::find().one(db).await {
-        Ok(None) => {
-            tracing::info!("No admin users found. Creating default 'admin' user...");
-            let default_admin = ActiveModel {
-                username: Set("admin".to_owned()),
-                // Hash for 'admin123'
-                password_hash: Set(
-                    "$2a$12$R9h/lIPzHZluvTFyvn.p8uW6XzvP7Gj7X5zB5zB5zB5zB5zB5zB5z".to_owned(),
-                ),
-                ..Default::default()
-            };
-
-            if let Err(e) = default_admin.insert(db).await {
-                tracing::error!("Failed to create default admin user: {}", e);
-            } else {
-                tracing::info!("Default 'admin' user created successfully");
-            }
-        }
-        Ok(Some(_)) => (),
-        Err(e) => tracing::error!("Failed to check for existing admin users: {}", e),
-    }
 }

@@ -4,7 +4,7 @@ services:
     container_name: mikhmon-admin-api
     restart: always
     ports:
-      - "${APP_BACKEND_PORT:-8080}:8080"
+      - "127.0.0.1:${APP_BACKEND_PORT:-8080}:8080"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:
@@ -23,6 +23,6 @@ services:
     container_name: mikhmon-admin-ui
     restart: always
     ports:
-      - "${APP_FRONTEND_PORT:-8089}:80"
+      - "127.0.0.1:${APP_FRONTEND_PORT:-8089}:80"
     depends_on:
       - backend
