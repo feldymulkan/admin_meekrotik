@@ -36,10 +36,19 @@ pub async fn auth_middleware(
         &Validation::default(),
     ) {
         Ok(token_data) => {
+            // If MFA is pending, only allow access to the MFA verification route
+            if token_data.claims.mfa_pending && req.uri().path() != "/api/auth/mfa/verify" {
+                tracing::warn!("MFA pending for user {}, access to {} denied", token_data.claims.sub, req.uri().path());
+                return Err(StatusCode::UNAUTHORIZED);
+            }
+
             let mut req = req;
             req.extensions_mut().insert(token_data.claims);
             Ok(next.run(req).await)
         }
-        Err(_) => Err(StatusCode::UNAUTHORIZED),
+        Err(e) => {
+            tracing::error!("JWT decoding failed: {}", e);
+            Err(StatusCode::UNAUTHORIZED)
+        }
     }
 }

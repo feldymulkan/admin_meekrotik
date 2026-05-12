@@ -4,6 +4,8 @@ import { AuthProvider, useAuth } from './AuthContext';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Settings from './pages/Settings';
+import PortManager from './pages/PortManager';
+import AuditLogs from './pages/AuditLogs';
 
 const PrivateRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { isAuthenticated } = useAuth();
@@ -21,6 +23,22 @@ const App: React.FC = () => {
             element={
               <PrivateRoute>
                 <Dashboard />
+              </PrivateRoute>
+            }
+          />
+          <Route
+            path="/port-manager"
+            element={
+              <PrivateRoute>
+                <PortManager />
+              </PrivateRoute>
+            }
+          />
+          <Route
+            path="/audit-logs"
+            element={
+              <PrivateRoute>
+                <AuditLogs />
               </PrivateRoute>
             }
           />

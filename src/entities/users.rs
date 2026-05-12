@@ -12,10 +12,28 @@ pub struct Model {
     pub username: String,
     pub password_hash: String,
     pub totp_secret: Option<String>,
+    pub mfa_enabled: bool,
     pub created_at: DateTimeUtc,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
-pub enum Relation {}
+pub enum Relation {
+    #[sea_orm(has_many = "super::port_rules::Entity")]
+    PortRules,
+    #[sea_orm(has_many = "super::audit_logs::Entity")]
+    AuditLogs,
+}
+
+impl Related<super::port_rules::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::PortRules.def()
+    }
+}
+
+impl Related<super::audit_logs::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::AuditLogs.def()
+    }
+}
 
 impl ActiveModelBehavior for ActiveModel {}

@@ -20,30 +20,35 @@ const Login: React.FC = () => {
     setLoading(true);
 
     try {
-      const payload: Record<string, string> = { username, password };
-      if (requires2FA) {
-        payload.totp_code = totpCode;
-      }
+      if (!requires2FA) {
+        // Step 1: Login
+        const response = await api.post('/auth/login', { username, password });
+        
+        if (response.data.requires_mfa) {
+          setRequires2FA(true);
+          // Store temp token
+          login(response.data.token); 
+          setLoading(false);
+          return;
+        }
 
-      const response = await api.post('/auth/login', payload);
-
-      if (response.data.requires_2fa && !response.data.token) {
-        setRequires2FA(true);
-        setLoading(false);
-        return;
-      }
-
-      if (response.data.token) {
-        login(response.data.token);
-        navigate('/');
+        if (response.data.token) {
+          login(response.data.token);
+          navigate('/');
+        }
+      } else {
+        // Step 2: MFA Verify
+        // The api instance already has the token from the login call above
+        const response = await api.post('/auth/mfa/verify', { totp_code: totpCode });
+        
+        if (response.data.token) {
+          login(response.data.token);
+          navigate('/');
+        }
       }
     } catch (err: any) {
       const msg = err.response?.data?.message || err.response?.data?.error || 'Login failed';
       setError(msg);
-      // If the error says 2FA is required, switch to 2FA mode
-      if (err.response?.data?.requires_2fa) {
-        setRequires2FA(true);
-      }
     } finally {
       setLoading(false);
     }

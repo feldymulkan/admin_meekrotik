@@ -15,8 +15,8 @@ FROM debian:bookworm-slim
 
 WORKDIR /app
 
-# Install runtime dependencies (OpenSSL is needed for MySQL/JWT)
-RUN apt-get update && apt-get install -y libssl3 ca-certificates && rm -rf /var/lib/apt/lists/*
+# Install runtime dependencies (OpenSSL is needed for MySQL/JWT, iptables for port forwarding)
+RUN apt-get update && apt-get install -y libssl3 ca-certificates iptables && rm -rf /var/lib/apt/lists/*
 
 # Copy binary from builder
 COPY --from=builder /usr/src/app/target/release/admin /app/admin

@@ -3,10 +3,11 @@ import { useAuth } from '../AuthContext';
 import { 
   Menu, 
   LayoutDashboard, 
-  Users, 
   LogOut, 
   Settings,
-  UserCircle
+  UserCircle,
+  Network,
+  History
 } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 
@@ -21,7 +22,8 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
 
   const menuItems = [
     { name: 'Dashboard', icon: <LayoutDashboard size={20} />, path: '/' },
-    { name: 'Users', icon: <Users size={20} />, path: '/' },
+    { name: 'Port Manager', icon: <Network size={20} />, path: '/port-manager' },
+    { name: 'Audit Logs', icon: <History size={20} />, path: '/audit-logs' },
     { name: 'Settings', icon: <Settings size={20} />, path: '/settings' },
   ];
 

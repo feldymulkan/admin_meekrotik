@@ -13,13 +13,17 @@ use jsonwebtoken::{encode, Header, EncodingKey};
 use totp_rs::{Algorithm, TOTP, Secret};
 use axum::Extension;
 
+use argon2::{
+    password_hash::{PasswordHash, PasswordVerifier},
+    Argon2,
+};
+
 // ==================== Structs ====================
 
 #[derive(Deserialize)]
 pub struct LoginRequest {
     pub username: String,
     pub password: String,
-    pub totp_code: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -27,25 +31,25 @@ pub struct LoginResponse {
     pub success: bool,
     pub message: String,
     pub token: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub requires_2fa: Option<bool>,
+    pub requires_mfa: bool,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Claims {
     pub sub: String,
     pub exp: usize,
+    pub mfa_pending: bool,
+}
+
+#[derive(Deserialize)]
+pub struct Verify2FARequest {
+    pub totp_code: String,
 }
 
 #[derive(Deserialize)]
 pub struct ResetPasswordRequest {
     pub current_password: String,
     pub new_password: String,
-}
-
-#[derive(Deserialize)]
-pub struct Verify2FARequest {
-    pub totp_code: String,
 }
 
 #[derive(Deserialize)]
@@ -83,62 +87,50 @@ pub async fn login(
 
     match user {
         Ok(Some(user)) => {
-            if !verify(&payload.password, &user.password_hash).unwrap_or(false) {
+            // Check password (support both Argon2 and bcrypt for migration)
+            let password_ok = if user.password_hash.starts_with("$argon2id$") {
+                let parsed_hash = PasswordHash::new(&user.password_hash).unwrap();
+                Argon2::default().verify_password(payload.password.as_bytes(), &parsed_hash).is_ok()
+            } else {
+                verify(&payload.password, &user.password_hash).unwrap_or(false)
+            };
+
+            if !password_ok {
                 return (StatusCode::UNAUTHORIZED, Json(LoginResponse {
                     success: false,
                     message: "Invalid credentials".to_string(),
                     token: None,
-                    requires_2fa: None,
+                    requires_mfa: false,
                 })).into_response();
             }
 
             // Check if 2FA is enabled
-            if let Some(ref totp_secret) = user.totp_secret {
-                // 2FA is enabled; we need the code
-                match &payload.totp_code {
-                    Some(code) => {
-                        let totp = match TOTP::new(
-                            Algorithm::SHA1,
-                            6,
-                            1,
-                            30,
-                            Secret::Encoded(totp_secret.clone()).to_bytes().unwrap_or_default(),
-                            Some("Mikhmon Admin".to_string()),
-                            user.username.clone(),
-                        ) {
-                            Ok(t) => t,
-                            Err(_) => {
-                                return (StatusCode::INTERNAL_SERVER_ERROR, Json(LoginResponse {
-                                    success: false,
-                                    message: "2FA configuration error".to_string(),
-                                    token: None,
-                                    requires_2fa: None,
-                                })).into_response();
-                            }
-                        };
+            let requires_mfa = user.mfa_enabled && user.totp_secret.is_some();
 
-                        if !totp.check_current(code).unwrap_or(false) {
-                            return (StatusCode::UNAUTHORIZED, Json(LoginResponse {
-                                success: false,
-                                message: "Invalid 2FA code".to_string(),
-                                token: None,
-                                requires_2fa: Some(true),
-                            })).into_response();
-                        }
-                    }
-                    None => {
-                        // Password correct but 2FA code not provided
-                        return (StatusCode::OK, Json(LoginResponse {
-                            success: false,
-                            message: "2FA code required".to_string(),
-                            token: None,
-                            requires_2fa: Some(true),
-                        })).into_response();
-                    }
-                }
+            if requires_mfa {
+                // Return temporary token
+                let expiration = chrono::Utc::now()
+                    .checked_add_signed(chrono::Duration::minutes(5))
+                    .expect("valid timestamp")
+                    .timestamp() as usize;
+
+                let claims = Claims {
+                    sub: user.username,
+                    exp: expiration,
+                    mfa_pending: true,
+                };
+
+                let token = encode(&Header::default(), &claims, &EncodingKey::from_secret(state.jwt_secret.as_ref())).unwrap();
+
+                return (StatusCode::OK, Json(LoginResponse {
+                    success: true,
+                    message: "MFA required".to_string(),
+                    token: Some(token),
+                    requires_mfa: true,
+                })).into_response();
             }
 
-            // Generate JWT token
+            // Generate Final JWT token
             let expiration = chrono::Utc::now()
                 .checked_add_signed(chrono::Duration::hours(24))
                 .expect("valid timestamp")
@@ -147,6 +139,7 @@ pub async fn login(
             let claims = Claims {
                 sub: user.username,
                 exp: expiration,
+                mfa_pending: false,
             };
 
             match encode(&Header::default(), &claims, &EncodingKey::from_secret(state.jwt_secret.as_ref())) {
@@ -155,7 +148,7 @@ pub async fn login(
                         success: true,
                         message: "Login successful".to_string(),
                         token: Some(token),
-                        requires_2fa: None,
+                        requires_mfa: false,
                     })).into_response()
                 }
                 Err(_) => {
@@ -163,7 +156,7 @@ pub async fn login(
                         success: false,
                         message: "Failed to generate token".to_string(),
                         token: None,
-                        requires_2fa: None,
+                        requires_mfa: false,
                     })).into_response()
                 }
             }
@@ -172,7 +165,89 @@ pub async fn login(
             success: false,
             message: "Invalid credentials".to_string(),
             token: None,
-            requires_2fa: None,
+            requires_mfa: false,
+        })).into_response(),
+    }
+}
+
+pub async fn mfa_verify(
+    State(state): State<AppState>,
+    Extension(claims): Extension<Claims>,
+    Json(payload): Json<Verify2FARequest>,
+) -> impl IntoResponse {
+    if !claims.mfa_pending {
+        return (StatusCode::BAD_REQUEST, Json(LoginResponse {
+            success: false,
+            message: "Invalid session state".to_string(),
+            token: None,
+            requires_mfa: false,
+        })).into_response();
+    }
+
+    let user = AdminUser::find()
+        .filter(Column::Username.eq(&claims.sub))
+        .one(&state.db)
+        .await;
+
+    match user {
+        Ok(Some(user)) => {
+            let totp_secret = match &user.totp_secret {
+                Some(s) => s,
+                None => {
+                    return (StatusCode::BAD_REQUEST, Json(LoginResponse {
+                        success: false,
+                        message: "MFA not configured".to_string(),
+                        token: None,
+                        requires_mfa: false,
+                    })).into_response();
+                }
+            };
+
+            let totp = TOTP::new(
+                Algorithm::SHA1,
+                6,
+                1,
+                30,
+                Secret::Encoded(totp_secret.clone()).to_bytes().unwrap_or_default(),
+                Some("Port Manager".to_string()),
+                user.username.clone(),
+            ).unwrap();
+
+            if !totp.check_current(&payload.totp_code).unwrap_or(false) {
+                return (StatusCode::UNAUTHORIZED, Json(LoginResponse {
+                    success: false,
+                    message: "Invalid MFA code".to_string(),
+                    token: None,
+                    requires_mfa: true,
+                })).into_response();
+            }
+
+            // Generate Final JWT
+            let expiration = chrono::Utc::now()
+                .checked_add_signed(chrono::Duration::hours(24))
+                .expect("valid timestamp")
+                .timestamp() as usize;
+
+            let final_claims = Claims {
+                sub: user.username,
+                exp: expiration,
+                mfa_pending: false,
+            };
+
+            let token = encode(&Header::default(), &final_claims, &EncodingKey::from_secret(state.jwt_secret.as_ref())).unwrap();
+
+            (StatusCode::OK, Json(LoginResponse {
+                success: true,
+                message: "MFA verified".to_string(),
+                token: Some(token),
+                requires_mfa: false,
+            })).into_response()
+        }
+        _ => (StatusCode::NOT_FOUND, Json(LoginResponse {
+            success: false,
+            message: "User not found".to_string(),
+            token: None,
+            requires_mfa: false,
         })).into_response(),
     }
 }

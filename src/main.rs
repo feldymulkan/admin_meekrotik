@@ -1,6 +1,6 @@
 use axum::{
+    routing::{get, patch, post, put, delete},
     Router,
-    routing::{get, patch, post, put},
 };
 use dotenvy::dotenv;
 use sea_orm::{ConnectOptions, Database, DatabaseConnection};
@@ -11,7 +11,11 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 mod entities;
 mod middleware;
 mod routes;
+mod system;
+use crate::entities::users;
+use bcrypt::{hash, DEFAULT_COST};
 use migration::MigratorTrait;
+use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -61,6 +65,7 @@ async fn main() {
     migration::Migrator::up(&state.db, None)
         .await
         .expect("Failed to run migrations for admin database");
+    seed_admin_user(&state.db).await;
     setup_mikhmon_database(&state.mikhmon_db).await;
 
     // CORS configuration
@@ -101,6 +106,12 @@ async fn main() {
         .route("/api/auth/2fa/verify", post(routes::auth::verify_2fa))
         .route("/api/auth/2fa/disable", post(routes::auth::disable_2fa))
         .route("/api/auth/2fa/status", get(routes::auth::get_2fa_status))
+        .route("/api/auth/mfa/verify", post(routes::auth::mfa_verify))
+        // Port rules
+        .route("/api/rules", get(routes::rules::list_rules).post(routes::rules::create_rule))
+        .route("/api/rules/:id", delete(routes::rules::delete_rule))
+        // Audit logs
+        .route("/api/audit-logs", get(routes::audit::list_audit_logs))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             middleware::auth::auth_middleware,
@@ -146,21 +157,59 @@ async fn main() {
 async fn setup_mikhmon_database(db: &sea_orm::DatabaseConnection) {
     tracing::info!("Checking and patching mikhmon database schema...");
 
-    // Daftar kolom yang perlu dipastikan ada di tabel 'users' mikhmon
+    // List of columns to ensure they exist in the 'users' table
     let alter_queries = [
-        "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active TINYINT(1) DEFAULT 1",
-        "ALTER TABLE users ADD COLUMN IF NOT EXISTS created_date VARCHAR(20) DEFAULT NULL",
-        "ALTER TABLE users ADD COLUMN IF NOT EXISTS expired_date VARCHAR(20) DEFAULT NULL",
+        ("unique_id", "VARCHAR(50) DEFAULT NULL"),
+        ("is_active", "TINYINT(1) DEFAULT 1"),
+        ("created_date", "VARCHAR(20) DEFAULT NULL"),
+        ("expired_date", "VARCHAR(20) DEFAULT NULL"),
     ];
 
-    for query in alter_queries {
-        match sea_orm::ConnectionTrait::execute_unprepared(db, query).await {
-            Ok(_) => (),
-            Err(e) => tracing::warn!(
-                "Notice: Table patch step might have skipped (this is usually fine): {}",
-                e
-            ),
+    for (name, definition) in alter_queries {
+        let query = format!("ALTER TABLE users ADD COLUMN {} {}", name, definition);
+        match sea_orm::ConnectionTrait::execute_unprepared(db, &query).await {
+            Ok(_) => tracing::info!("Column '{}' ensured.", name),
+            Err(e) => {
+                let err_str = e.to_string();
+                if err_str.contains("1060") || err_str.contains("Duplicate column name") {
+                    // Column already exists, this is fine
+                    tracing::debug!("Column '{}' already exists.", name);
+                } else {
+                    tracing::warn!(
+                        "Notice: Table patch step for '{}' might have skipped: {}",
+                        name, e
+                    );
+                }
+            }
         }
     }
     tracing::info!("Mikhmon database schema check completed.");
+}
+
+async fn seed_admin_user(db: &sea_orm::DatabaseConnection) {
+    tracing::info!("Checking if admin user needs to be seeded...");
+
+    match users::Entity::find().one(db).await {
+        Ok(None) => {
+            tracing::info!("No admin user found. Creating default admin user...");
+
+            let username = std::env::var("ADMIN_USERNAME").unwrap_or_else(|_| "admin".to_string());
+            let password = std::env::var("ADMIN_PASSWORD").unwrap_or_else(|_| "admin".to_string());
+
+            let password_hash = hash(password, DEFAULT_COST).expect("Failed to hash password");
+
+            let admin = users::ActiveModel {
+                username: Set(username),
+                password_hash: Set(password_hash),
+                ..Default::default()
+            };
+
+            match admin.insert(db).await {
+                Ok(_) => tracing::info!("Default admin user created successfully."),
+                Err(e) => tracing::error!("Failed to create default admin user: {}", e),
+            }
+        }
+        Ok(Some(_)) => tracing::info!("Admin user already exists. Skipping seed."),
+        Err(e) => tracing::error!("Failed to check for admin user: {}", e),
+    }
 }

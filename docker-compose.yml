@@ -1,18 +1,44 @@
 services:
+  db:
+    image: mysql:8.0
+    container_name: mikhmon-admin-db
+    restart: always
+    environment:
+      - MYSQL_ROOT_PASSWORD=pepadu
+      - MYSQL_DATABASE=admin_db
+      - MYSQL_USER=pepadu
+      - MYSQL_PASSWORD=pepadu
+    ports:
+      - "127.0.0.1:3307:3306"
+    volumes:
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "pepadu", "-ppepadu"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   backend:
     build: .
     container_name: mikhmon-admin-api
     restart: always
+    cap_add:
+      - NET_ADMIN
     ports:
       - "127.0.0.1:${APP_BACKEND_PORT:-8080}:8080"
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+    depends_on:
+      db:
+        condition: service_healthy
     environment:
-      - DATABASE_URL=mysql://pepadu:pepadu@host.docker.internal:3306/admin_db
-      - MIKHMON_DATABASE_URL=mysql://mikhmon_user:mikhmon_pass123@host.docker.internal:3306/mikhmon
+      - DATABASE_URL=mysql://pepadu:pepadu@db:3306/admin_db
+      - MIKHMON_DATABASE_URL=mysql://pepadu:pepadu@db:3306/mikhmon
       - HOST=0.0.0.0
       - PORT=8080
       - FRONTEND_URL=${FRONTEND_URL:-http://localhost:8089}
+      - JWT_SECRET=${JWT_SECRET:-secret}
+      - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin}
     env_file:
       - .env
 
@@ -26,3 +52,6 @@ services:
       - "127.0.0.1:${APP_FRONTEND_PORT:-8089}:80"
     depends_on:
       - backend
+
+volumes:
+  mysql_data:
